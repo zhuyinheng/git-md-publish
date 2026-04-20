@@ -43,21 +43,26 @@ jobs:
     strategy:
       matrix:
         include:
-          # Native runners: postject's Mach-O / ELF writers are reliable on
-          # the matching host, and macOS arm64 needs a local `codesign` to
-          # re-sign the binary after injection.
+          # macOS runners are both Apple Silicon (arm64). darwin-arm64 is
+          # a native build; darwin-x64 cross-builds from arm64 — postject
+          # and codesign are darwin-native on both, so the Mach-O comes
+          # out valid + signed regardless of host arch.
           - os: darwin
             arch: arm64
+            runner: macos-15
+            native: true
+          - os: darwin
+            arch: x64
             runner: macos-14
-          - os: darwin
-            arch: x64
-            runner: macos-13
+            native: false
           - os: linux
             arch: arm64
             runner: ubuntu-latest
+            native: false
           - os: linux
             arch: x64
             runner: ubuntu-latest
+            native: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,7 +74,7 @@ jobs:
       - name: Build standalone binary
         run: node scripts/build.js ${{ matrix.os }} ${{ matrix.arch }}
       - name: Smoke test the binary (native targets only)
-        if: matrix.runner != 'ubuntu-latest' || matrix.arch == 'x64'
+        if: matrix.native
         run: ./dist/git-md-publish-${{ matrix.os }}-${{ matrix.arch }} --help
       - uses: actions/upload-artifact@v4
         with:
