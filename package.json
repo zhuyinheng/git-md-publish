@@ -23,5 +23,9 @@
   "dependencies": {
     "js-yaml": "^4.1.0",
     "tar-stream": "^3.1.7"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "postject": "^1.0.0-alpha.6"
   }
 }
