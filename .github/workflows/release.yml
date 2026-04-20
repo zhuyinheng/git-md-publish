@@ -43,17 +43,17 @@ jobs:
     strategy:
       matrix:
         include:
-          # macOS runners are both Apple Silicon (arm64). darwin-arm64 is
-          # a native build; darwin-x64 cross-builds from arm64 — postject
-          # and codesign are darwin-native on both, so the Mach-O comes
-          # out valid + signed regardless of host arch.
+          # darwin-arm64 is native; darwin-x64 cross-builds from the same
+          # arm64 host. postject and codesign are darwin-native on both,
+          # so the Mach-O is valid + signed regardless of host arch. One
+          # runner image keeps caching and tooling consistent.
           - os: darwin
             arch: arm64
             runner: macos-15
             native: true
           - os: darwin
             arch: x64
-            runner: macos-14
+            runner: macos-15
             native: false
           - os: linux
             arch: arm64
