@@ -49,11 +49,16 @@ https://github.com/<owner>/<repo>/releases/download/<releaseTag>
 
 ```text
 install.sh
+git-md-publish.cjs
 git-md-publish-darwin-arm64
 git-md-publish-darwin-x64
 git-md-publish-linux-arm64
 git-md-publish-linux-x64
 ```
+
+- `git-md-publish.cjs` 是单文件 Node bundle，供 `install.sh` 的
+  Node channel 使用（见 `design_install.md`）。
+- 各平台 standalone binary 供 Binary channel 使用。
 
 - 用户安装入口是：
 

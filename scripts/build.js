@@ -16,6 +16,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import https from "node:https";
+import { bundleCli } from "./bundle.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -73,25 +74,6 @@ async function fetchNode(platformKey) {
   return path.join(extractDir, bin);
 }
 
-async function bundleCli() {
-  // Produce a self-contained CJS bundle from the ESM CLI entry. SEA expects
-  // a CommonJS-like main module, so we hand esbuild the ESM entry and ask
-  // for a single cjs output.
-  const { build } = await import("esbuild");
-  const outFile = path.join(CACHE, "cli.bundle.cjs");
-  await build({
-    entryPoints: [path.join(ROOT, "src", "cli.js")],
-    bundle: true,
-    platform: "node",
-    target: "node20",
-    format: "cjs",
-    outfile: outFile,
-    legalComments: "none",
-    minify: false,
-  });
-  return outFile;
-}
-
 function hostPlatformKey() {
   // Map Node's process.platform / process.arch to our PLATFORM_MAP key.
   const os = process.platform === "darwin" ? "darwin" : "linux";
@@ -106,7 +88,9 @@ async function buildOne(osName, archName) {
   fs.mkdirSync(DIST, { recursive: true });
   fs.mkdirSync(CACHE, { recursive: true });
 
-  const bundlePath = await bundleCli();
+  const bundlePath = await bundleCli({
+    outFile: path.join(CACHE, "cli.bundle.cjs"),
+  });
 
   // SEA blob format is Node-version specific. Generate the blob with a
   // Node matching `NODE_VERSION` that can actually run on the host. Use

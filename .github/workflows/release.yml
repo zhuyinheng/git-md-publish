@@ -77,6 +77,30 @@ jobs:
           path: dist/git-md-publish-${{ matrix.os }}-${{ matrix.arch }}
 
   # -------------------------------------------------------------------------
+  # 2b. Build the single-file JS release asset. install.sh uses this when
+  #     the host already has node >= 20.
+  # -------------------------------------------------------------------------
+  build_js:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - name: Build JS bundle
+        run: node scripts/build-js.js
+      - name: Smoke test JS bundle
+        run: node dist/git-md-publish.cjs --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: git-md-publish.cjs
+          path: dist/git-md-publish.cjs
+
+  # -------------------------------------------------------------------------
   # 3. Generate install.sh against the release tag + owner/repo.
   # -------------------------------------------------------------------------
   installer:
@@ -103,7 +127,7 @@ jobs:
   #    publish.
   # -------------------------------------------------------------------------
   publish:
-    needs: [build, installer]
+    needs: [build, build_js, installer]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,6 +144,7 @@ jobs:
           test -f "dist/git-md-publish-darwin-x64"
           test -f "dist/git-md-publish-linux-arm64"
           test -f "dist/git-md-publish-linux-x64"
+          test -f "dist/git-md-publish.cjs"
           test -f "dist/install.sh"
       - name: Create draft release
         env:
@@ -127,7 +152,7 @@ jobs:
         run: |
           TAG="${{ inputs.release_tag || github.ref_name }}"
           gh release create "$TAG" --draft --title "$TAG" --notes "Release $TAG"
-      - name: Upload binaries (before install.sh)
+      - name: Upload payload assets (before install.sh)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -136,7 +161,8 @@ jobs:
             dist/git-md-publish-darwin-arm64 \
             dist/git-md-publish-darwin-x64 \
             dist/git-md-publish-linux-arm64 \
-            dist/git-md-publish-linux-x64
+            dist/git-md-publish-linux-x64 \
+            dist/git-md-publish.cjs
       - name: Upload install.sh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

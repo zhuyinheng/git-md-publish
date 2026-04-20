@@ -10,6 +10,7 @@ const TAG = process.env.GMP_RELEASE_TAG;
 
 const ASSETS = [
   "install.sh",
+  "git-md-publish.cjs",
   "git-md-publish-darwin-arm64",
   "git-md-publish-darwin-x64",
   "git-md-publish-linux-arm64",

@@ -15,6 +15,7 @@ const ROOT = path.resolve(__dirname, "..", "..");
 
 const EXPECTED_ASSETS = [
   "install.sh",
+  "git-md-publish.cjs",
   "git-md-publish-darwin-arm64",
   "git-md-publish-darwin-x64",
   "git-md-publish-linux-arm64",
@@ -67,7 +68,7 @@ test("release: generated install.sh embeds the correct asset base URL", () => {
   }
 });
 
-test("release: install.sh is self-contained (no Node, no external deps)", () => {
+test("release: install.sh downloads without requiring npm, depends only on standard UNIX tools", () => {
   const dir = mkTmp("gmp-release-");
   try {
     const outPath = path.join(dir, "install.sh");
@@ -77,9 +78,11 @@ test("release: install.sh is self-contained (no Node, no external deps)", () => 
       { encoding: "utf8" },
     );
     const body = fs.readFileSync(outPath, "utf8");
-    assert.doesNotMatch(body, /\bnode\b/i, "install.sh must not invoke node");
-    assert.doesNotMatch(body, /\bnpm\b/i, "install.sh must not invoke npm");
-    // Uses only curl / wget as downloader — matches design_install.md.
+    // install.sh MAY mention `node` now — it uses host node when
+    // available to install the JS bundle channel. But it must never
+    // need npm: we ship a single pre-bundled file.
+    assert.doesNotMatch(body, /\bnpm\b/, "install.sh must not invoke npm");
+    // Downloader toolchain is standard: curl or wget.
     assert.match(body, /command -v curl/);
     assert.match(body, /command -v wget/);
   } finally {

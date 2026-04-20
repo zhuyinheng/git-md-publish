@@ -13,9 +13,18 @@ the user / reviewer-facing overview.
 curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | sh
 ```
 
-The installer drops a standalone binary at `~/.local/bin/git-md-publish`
-and offers to append that directory to `PATH`. No Node install required
-after that.
+`install.sh` picks a channel automatically:
+
+* **Node channel** (used when `node >= 20` is on `PATH`): downloads a
+  single-file CJS bundle to `~/.local/lib/git-md-publish/git-md-publish.cjs`
+  and a tiny shell wrapper to `~/.local/bin/git-md-publish` that delegates
+  to `node`. Avoids SEA / Mach-O signing entirely.
+* **Binary channel** (used otherwise): downloads the prebuilt standalone
+  binary for the host OS / arch straight to `~/.local/bin/git-md-publish`.
+  No Node required.
+
+Force one or the other with `GIT_MD_PUBLISH_CHANNEL=node` or
+`GIT_MD_PUBLISH_CHANNEL=binary`.
 
 ## Usage
 
@@ -67,7 +76,9 @@ test/
 install/
   install.sh.tmpl Template for the installer; rendered per release.
 scripts/
+  bundle.js              Shared esbuild bundle step.
   build.js               Standalone binary build per (os, arch).
+  build-js.js            Single-file Node bundle (`git-md-publish.cjs`).
   generate-install.js    Render install.sh for a given release tag.
 .github/workflows/
   release.yml    Build + release pipeline.

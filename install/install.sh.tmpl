@@ -5,21 +5,41 @@
 # Usage:
 #   curl -fsSL <install-url> | sh
 #
-# The installer:
-#   * detects host OS / arch,
-#   * downloads the matching standalone binary,
-#   * installs it to ~/.local/bin/git-md-publish,
-#   * offers to append that directory to PATH if it isn't already there.
+# The installer has two channels:
+#
+#   1. Node channel (preferred): if the host already has `node >= 20`, we
+#      install a single CJS bundle to ~/.local/lib/git-md-publish and a
+#      thin shell wrapper to ~/.local/bin/git-md-publish. This avoids SEA
+#      / Mach-O signing edge cases entirely.
+#   2. Binary channel (fallback): otherwise we download the prebuilt
+#      standalone binary for the host OS / arch and install it at
+#      ~/.local/bin/git-md-publish.
+#
+# Force the binary channel with `GIT_MD_PUBLISH_CHANNEL=binary`.
 
 set -eu
 
 RELEASE_TAG="__RELEASE_TAG__"
 ASSET_BASE_URL="__ASSET_BASE_URL__"
 INSTALL_DIR="${GIT_MD_PUBLISH_INSTALL_DIR:-$HOME/.local/bin}"
+LIB_DIR="${GIT_MD_PUBLISH_LIB_DIR:-$HOME/.local/lib/git-md-publish}"
 BINARY_NAME="git-md-publish"
+JS_ASSET="git-md-publish.cjs"
+CHANNEL="${GIT_MD_PUBLISH_CHANNEL:-auto}"
 
 log() { printf 'install: %s\n' "$*" >&2; }
 fail() { log "$*"; exit 1; }
+
+download() {
+    # download <url> <dest>
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$1" -o "$2"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$1" -O "$2"
+    else
+        fail "need curl or wget to download assets"
+    fi
+}
 
 detect_os() {
     case "$(uname -s)" in
@@ -37,31 +57,79 @@ detect_arch() {
     esac
 }
 
-OS="$(detect_os)"
-ARCH="$(detect_arch)"
-ASSET="${BINARY_NAME}-${OS}-${ARCH}"
-URL="${ASSET_BASE_URL}/${ASSET}"
+node_major() {
+    # Prints the host Node major version, or 0 if node is unavailable or
+    # doesn't report a sane version.
+    if ! command -v node >/dev/null 2>&1; then
+        echo 0
+        return
+    fi
+    node -e 'process.stdout.write(String(Number(process.versions.node.split(".")[0] || 0)))' 2>/dev/null || echo 0
+}
+
+pick_channel() {
+    # Returns "node" or "binary" on stdout.
+    case "${CHANNEL}" in
+        node|binary)
+            echo "${CHANNEL}"
+            return
+            ;;
+    esac
+    major="$(node_major)"
+    if [ "${major}" -ge 20 ] 2>/dev/null; then
+        echo node
+    else
+        echo binary
+    fi
+}
+
+install_node_channel() {
+    log "using Node channel (node $(node --version))"
+    mkdir -p "${INSTALL_DIR}" "${LIB_DIR}"
+    url="${ASSET_BASE_URL}/${JS_ASSET}"
+    tmp="$(mktemp)"
+    trap 'rm -f "${tmp}"' EXIT
+    download "${url}" "${tmp}"
+    mv "${tmp}" "${LIB_DIR}/${JS_ASSET}"
+    chmod +x "${LIB_DIR}/${JS_ASSET}"
+    trap - EXIT
+
+    # Wrapper script. `exec` so signals propagate and the child's exit
+    # code is the wrapper's exit code.
+    wrapper="${INSTALL_DIR}/${BINARY_NAME}"
+    cat >"${wrapper}" <<WRAP
+#!/bin/sh
+exec node "${LIB_DIR}/${JS_ASSET}" "\$@"
+WRAP
+    chmod +x "${wrapper}"
+    log "target:       ${wrapper}"
+    log "js bundle:    ${LIB_DIR}/${JS_ASSET}"
+}
+
+install_binary_channel() {
+    OS="$(detect_os)"
+    ARCH="$(detect_arch)"
+    ASSET="${BINARY_NAME}-${OS}-${ARCH}"
+    URL="${ASSET_BASE_URL}/${ASSET}"
+    log "using Binary channel for ${OS}/${ARCH}"
+    log "target:       ${INSTALL_DIR}/${BINARY_NAME}"
+    mkdir -p "${INSTALL_DIR}"
+    tmp="$(mktemp)"
+    trap 'rm -f "${tmp}"' EXIT
+    download "${URL}" "${tmp}"
+    mv "${tmp}" "${INSTALL_DIR}/${BINARY_NAME}"
+    chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
+    trap - EXIT
+}
 
 log "release tag:  ${RELEASE_TAG}"
-log "asset:        ${ASSET}"
-log "target:       ${INSTALL_DIR}/${BINARY_NAME}"
 
-mkdir -p "${INSTALL_DIR}"
-
-tmp="$(mktemp)"
-trap 'rm -f "${tmp}"' EXIT
-
-if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "${URL}" -o "${tmp}"
-elif command -v wget >/dev/null 2>&1; then
-    wget -q "${URL}" -O "${tmp}"
-else
-    fail "need curl or wget to download binary"
-fi
-
-mv "${tmp}" "${INSTALL_DIR}/${BINARY_NAME}"
-chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
-trap - EXIT
+channel="$(pick_channel)"
+case "${channel}" in
+    node)   install_node_channel ;;
+    binary) install_binary_channel ;;
+    *) fail "unknown channel: ${channel}" ;;
+esac
 
 # -- PATH handling ---------------------------------------------------------
 
