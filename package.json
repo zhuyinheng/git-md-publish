@@ -21,8 +21,14 @@
     "build": "node scripts/build.js"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0",
-    "tar-stream": "^3.1.7"
+    "@flowershow/remark-wiki-link": "^3.4.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "tar-stream": "^3.1.7",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.1.0",
+    "vfile": "^6.0.3",
+    "vfile-matter": "^5.0.1"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

@@ -1,25 +1,27 @@
-// Extract link / image / wikilink / embed targets from a Markdown body.
+// Extract link / image / wikilink / embed targets from a Markdown body
+// via a real Markdown AST.
 //
-// We do not build a full Markdown AST; we match the specific surface forms
-// listed in dev_docs/design_scan.md on a body with code stripped. The
-// matcher prefers false positives (a tracked file included unnecessarily)
-// over false negatives (a public file silently losing an attachment).
+// Stack (per dev_docs/design_scan.md §11.1):
+//   * `remark-parse`       — CommonMark tokenizer → mdast
+//   * `remark-gfm`         — tables, autolinks, strikethrough, etc.
+//   * `@flowershow/remark-wiki-link` — Obsidian-style `[[...]]` / `![[...]]`
+//
+// AST traversal means code blocks, HTML blocks, inline code etc. are
+// structurally distinct nodes — we don't need to pre-strip them to avoid
+// false positives.
 
-const STANDARD_INLINE_RE = /!?\[[^\]\n]*?\]\(\s*(<[^>\n]*>|[^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
-const REFERENCE_USE_RE = /!?\[[^\]\n]*?\]\[([^\]\n]+)\]/g;
-const REFERENCE_DEF_RE = /^[ \t]{0,3}\[([^\]\n]+)\]:\s*(<[^>\n]*>|\S+)/gm;
-const WIKILINK_RE = /!?\[\[([^\]\n|#]+)(?:#[^\]\n|]*)?(?:\|[^\]\n]*)?\]\]/g;
-const CODE_FENCE_RE = /(^|\n)```[\s\S]*?\n```/g;
-const INLINE_CODE_RE = /`[^`\n]*`/g;
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+import wikiLink from "@flowershow/remark-wiki-link";
+import { visit } from "unist-util-visit";
 
-function stripCode(markdown) {
-  return markdown.replace(CODE_FENCE_RE, "\n").replace(INLINE_CODE_RE, "");
-}
+const PROCESSOR = unified().use(remarkParse).use(remarkGfm).use(wikiLink);
 
 function cleanTarget(target) {
   // Undo the syntactic wrapping that can appear around a link target:
   // angle brackets, fragment, query string, URL encoding.
-  let t = target.trim();
+  let t = String(target ?? "").trim();
   if (t.startsWith("<") && t.endsWith(">")) t = t.slice(1, -1);
   const hash = t.indexOf("#");
   if (hash >= 0) t = t.slice(0, hash);
@@ -39,34 +41,47 @@ function isExternal(target) {
 
 export function extractReferences(markdown) {
   // Returns `[{ target }]` with every target normalised. Callers resolve
-  // targets against the tracked tree; this module doesn't need to know how.
-  const body = stripCode(markdown);
+  // targets against the tracked tree; this module doesn't know about paths.
+  const tree = PROCESSOR.parse(markdown);
+
+  // First pass: collect definitions so reference-style links/images can
+  // resolve their identifier → url.
+  const defs = new Map();
+  visit(tree, "definition", (node) => {
+    if (node.identifier && node.url) {
+      defs.set(node.identifier.toLowerCase(), node.url);
+    }
+  });
+
   const out = [];
+  const pushIfInternal = (rawUrl) => {
+    const cleaned = cleanTarget(rawUrl);
+    if (!cleaned || isExternal(cleaned)) return;
+    out.push({ target: cleaned });
+  };
 
-  // Build reference label → target map so [foo][bar] uses anywhere in the
-  // doc resolve correctly.
-  const refDefs = new Map();
-  for (const m of body.matchAll(REFERENCE_DEF_RE)) {
-    const label = m[1].trim().toLowerCase();
-    const target = cleanTarget(m[2]);
-    if (target) refDefs.set(label, target);
-  }
-
-  for (const m of body.matchAll(STANDARD_INLINE_RE)) {
-    const target = cleanTarget(m[1]);
-    if (target && !isExternal(target)) out.push({ target });
-  }
-
-  for (const m of body.matchAll(REFERENCE_USE_RE)) {
-    const label = m[1].trim().toLowerCase();
-    const target = refDefs.get(label);
-    if (target && !isExternal(target)) out.push({ target });
-  }
-
-  for (const m of body.matchAll(WIKILINK_RE)) {
-    const target = cleanTarget(m[1]);
-    if (target) out.push({ target });
-  }
+  visit(tree, (node) => {
+    switch (node.type) {
+      case "link":
+      case "image":
+        pushIfInternal(node.url);
+        break;
+      case "linkReference":
+      case "imageReference": {
+        const url = defs.get((node.identifier ?? "").toLowerCase());
+        if (url) pushIfInternal(url);
+        break;
+      }
+      case "wikiLink":
+      case "embed": {
+        // Obsidian-style links never carry a URL scheme, so no isExternal
+        // check is needed — but we still strip the fragment / alias.
+        const cleaned = cleanTarget(node.value);
+        if (cleaned) out.push({ target: cleaned });
+        break;
+      }
+    }
+  });
 
   return out;
 }

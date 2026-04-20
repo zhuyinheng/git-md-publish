@@ -1,41 +1,35 @@
 // Extract and parse YAML frontmatter from Markdown.
 //
-// A frontmatter block is a YAML document delimited by `---` lines that starts
-// on the very first line of the file.
+// Uses `vfile-matter`, which parses `---`-delimited YAML frontmatter with
+// the `yaml` package and strips it from the document body. Aligns with
+// dev_docs/design_scan.md §7.
 
-import yaml from "js-yaml";
-
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+import { VFile } from "vfile";
+import { matter } from "vfile-matter";
 
 export function extractFrontmatter(markdown) {
-  // Returns { data, body, raw } where:
-  //   data: parsed YAML (object) or null if no frontmatter
-  //   body: markdown body with the frontmatter stripped
-  //   raw:  the raw YAML text (useful for diagnostics)
-  // If YAML parsing fails, `data` is null and `error` carries the YAML error.
-  const match = markdown.match(FRONTMATTER_RE);
-  if (!match) {
-    return { data: null, body: markdown, raw: null, error: null };
-  }
-  const raw = match[1];
-  const body = markdown.slice(match[0].length);
+  // Returns { data, body, error } where:
+  //   data:  parsed YAML object, or null if no frontmatter / non-object body.
+  //   body:  markdown body with the frontmatter stripped.
+  //   error: YAML parse error, or null on success.
+  const file = new VFile({ value: markdown });
   try {
-    const data = yaml.load(raw);
-    // yaml.load returns undefined for empty docs; normalize to null.
-    return {
-      data: data && typeof data === "object" ? data : null,
-      body,
-      raw,
-      error: null,
-    };
+    matter(file, { strip: true });
   } catch (error) {
-    return { data: null, body, raw, error };
+    return { data: null, body: markdown, error };
   }
+  const raw = file.data.matter;
+  return {
+    data: raw && typeof raw === "object" ? raw : null,
+    body: String(file.value),
+    error: null,
+  };
 }
 
 export function readPublicFlag(data) {
-  // Returns true / false if explicitly set, undefined otherwise.
-  // Only a real boolean terminates the inheritance walk.
+  // Returns true / false only when `public` is an explicit boolean.
+  // Any other shape (missing key, null, string, number, array, ...) falls
+  // back to `undefined` so visibility inheritance keeps walking.
   if (!data) return undefined;
   if (typeof data.public === "boolean") return data.public;
   return undefined;

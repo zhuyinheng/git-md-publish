@@ -1,12 +1,17 @@
-// Scan: given a git repo, list the public files to publish.
+// Scan: given a git repo, list the public files to publish and any broken
+// references found.
 //
-// See dev_docs/design_scan.md. The passes are:
-//   1. Enumerate HEAD's tree (skip symlinks + gitlinks).
-//   2. Parse every markdown file's frontmatter; record each file's own
+// See dev_docs/design_scan.md. Pipeline:
+//   1. Enumerate HEAD's tree (skip gitlinks; symlinks are kept as-is).
+//   2. Parse every markdown file's frontmatter. Record each file's own
 //      `public` flag, and each README.md's `public` flag by directory.
-//   3. Walk references of each public markdown; collect non-markdown
-//      attachments that resolve to a tracked path.
-//   4. Emit the deduplicated path list in stable (sorted) order.
+//   3. For every public markdown, walk references:
+//        - resolved markdown + public   → already collected; skip
+//        - resolved markdown + private  → broken reference, reason "not-public"
+//        - resolved non-markdown        → add to attachments
+//        - unresolved                   → broken reference, reason "missing"
+//   4. Emit the deduplicated path list in stable (sorted) order, plus any
+//      warnings and broken references.
 
 import path from "node:path/posix";
 import { listTreeHead, readBlob } from "./git.js";
@@ -14,7 +19,6 @@ import { extractFrontmatter, readPublicFlag } from "./frontmatter.js";
 import { extractReferences } from "./references.js";
 
 const MARKDOWN_EXT = ".md";
-const SYMLINK_MODE = "120000";
 const GITLINK_MODE = "160000";
 
 function isMarkdown(p) {
@@ -94,18 +98,17 @@ export async function scanRepo({ repoRoot, warn = () => {} }) {
     warn(msg);
   };
 
-  // path -> { oid, mode }
+  // path -> { oid, mode, type }
   const blobs = new Map();
   const basenameIndex = new Map();
   const ambiguousBasenames = new Set();
 
   for (const entry of entries) {
     if (entry.type !== "blob") continue;
-    if (entry.mode === SYMLINK_MODE) {
-      emit(`skipping tracked symlink: ${entry.path}`);
-      continue;
-    }
     if (entry.mode === GITLINK_MODE) continue;
+    // Symlinks stay in the map. Their blob content is the link target
+    // string; `git archive` preserves the symlink on export. We never
+    // dereference, so the presence or absence of the target is irrelevant.
     blobs.set(entry.path, entry);
     const base = path.basename(entry.path);
     if (ambiguousBasenames.has(base)) continue;
@@ -125,7 +128,7 @@ export async function scanRepo({ repoRoot, warn = () => {} }) {
 
   await Promise.all(
     [...blobs.entries()]
-      .filter(([p]) => isMarkdown(p))
+      .filter(([p, entry]) => isMarkdown(p) && entry.mode !== "120000")
       .map(async ([filePath, { oid }]) => {
         const content = (await readBlob(repoRoot, oid)).toString("utf8");
         const { data, body, error } = extractFrontmatter(content);
@@ -144,14 +147,16 @@ export async function scanRepo({ repoRoot, warn = () => {} }) {
   const resolveVisibility = makeVisibilityResolver(readmeByDir);
 
   const publicMarkdown = new Set();
-  for (const filePath of blobs.keys()) {
+  for (const [filePath, entry] of blobs) {
     if (!isMarkdown(filePath)) continue;
+    if (entry.mode === "120000") continue; // symlink-as-markdown: never public on its own
     if (resolveVisibility(filePath, fileSelfPublic.get(filePath))) {
       publicMarkdown.add(filePath);
     }
   }
 
   const attachments = new Set();
+  const brokenRefs = [];
   for (const filePath of publicMarkdown) {
     const body = markdownBody.get(filePath);
     for (const { target } of extractReferences(body)) {
@@ -161,13 +166,27 @@ export async function scanRepo({ repoRoot, warn = () => {} }) {
         blobs,
         basenameIndex,
       });
-      if (!resolved || isMarkdown(resolved)) continue;
+      if (!resolved) {
+        brokenRefs.push({ from: filePath, target, reason: "missing" });
+        continue;
+      }
+      if (isMarkdown(resolved)) {
+        if (!publicMarkdown.has(resolved)) {
+          brokenRefs.push({ from: filePath, target, reason: "not-public" });
+        }
+        // Public markdown is already in publicMarkdown; don't double-collect.
+        continue;
+      }
       attachments.add(resolved);
     }
   }
 
+  for (const br of brokenRefs) {
+    emit(`broken reference (${br.reason}): ${br.from} -> ${br.target}`);
+  }
+
   const paths = [...new Set([...publicMarkdown, ...attachments])].sort();
-  return { paths, warnings };
+  return { paths, warnings, brokenRefs };
 }
 
 export async function runScan({ repoRoot, stdout, stderr }) {
