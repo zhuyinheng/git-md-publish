@@ -26,6 +26,34 @@ curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh
 Force one or the other with `GIT_MD_PUBLISH_CHANNEL=node` or
 `GIT_MD_PUBLISH_CHANNEL=binary`.
 
+### Try it against the test vault
+
+Same vault used by the test suite, either channel works:
+
+```sh
+# Node channel (picked automatically if node >= 20 is on PATH)
+curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | sh
+
+# Binary channel (force standalone binary even if node is available)
+curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh \
+  | GIT_MD_PUBLISH_CHANNEL=binary sh
+
+# Either channel: publish obsidian_test_vault to a throwaway local mirror
+git clone https://github.com/<owner>/obsidian_test_vault.git /tmp/vault
+git-md-publish publish /tmp/vault remote=/tmp/vault-mirror branch=main
+git --git-dir=/tmp/vault-mirror log --oneline main
+```
+
+Re-running the same publish must produce the same commit oid — output is
+deterministic (source HEAD + mtime in, identical snapshot commit out).
+
+Before switching channels, clear the previous install:
+
+```sh
+rm -f ~/.local/bin/git-md-publish
+rm -rf ~/.local/lib/git-md-publish
+```
+
 ## Usage
 
 ```sh
