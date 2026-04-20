@@ -1,0 +1,141 @@
+name: release
+# Build + publish standalone binaries and the installer for each version tag.
+# See dev_docs/design_release.md.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Version tag to (re)release, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------------------
+  # 1. Run the local test suite against the release ref before we build.
+  # -------------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm run test:local
+
+  # -------------------------------------------------------------------------
+  # 2. Build one standalone binary per (os, arch).
+  #    Node's `--experimental-sea-config` SEA support is stable in 20.x; we
+  #    stay on a single runner and cross-generate via the prebuilt node
+  #    binaries published by nodejs.org.
+  # -------------------------------------------------------------------------
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: darwin
+            arch: arm64
+          - os: darwin
+            arch: x64
+          - os: linux
+            arch: arm64
+          - os: linux
+            arch: x64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - name: Build standalone binary
+        run: node scripts/build.js ${{ matrix.os }} ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: git-md-publish-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/git-md-publish-${{ matrix.os }}-${{ matrix.arch }}
+
+  # -------------------------------------------------------------------------
+  # 3. Generate install.sh against the release tag + owner/repo.
+  # -------------------------------------------------------------------------
+  installer:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Render install.sh
+        run: |
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          node scripts/generate-install.js "$TAG" "${GITHUB_REPOSITORY}" dist/install.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: install.sh
+          path: dist/install.sh
+
+  # -------------------------------------------------------------------------
+  # 4. Create a draft release, upload binaries first, then install.sh, then
+  #    publish.
+  # -------------------------------------------------------------------------
+  publish:
+    needs: [build, installer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Stage release assets
+        run: |
+          ls -la dist
+          test -f "dist/git-md-publish-darwin-arm64"
+          test -f "dist/git-md-publish-darwin-x64"
+          test -f "dist/git-md-publish-linux-arm64"
+          test -f "dist/git-md-publish-linux-x64"
+          test -f "dist/install.sh"
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          gh release create "$TAG" --draft --title "$TAG" --notes "Release $TAG"
+      - name: Upload binaries (before install.sh)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          gh release upload "$TAG" \
+            dist/git-md-publish-darwin-arm64 \
+            dist/git-md-publish-darwin-x64 \
+            dist/git-md-publish-linux-arm64 \
+            dist/git-md-publish-linux-x64
+      - name: Upload install.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          gh release upload "$TAG" dist/install.sh
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          gh release edit "$TAG" --draft=false

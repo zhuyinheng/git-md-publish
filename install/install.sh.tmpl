@@ -1,0 +1,115 @@
+#!/bin/sh
+# git-md-publish installer. Generated from install/install.sh.tmpl; see
+# dev_docs/design_install.md and dev_docs/design_release.md.
+#
+# Usage:
+#   curl -fsSL <install-url> | sh
+#
+# The installer:
+#   * detects host OS / arch,
+#   * downloads the matching standalone binary,
+#   * installs it to ~/.local/bin/git-md-publish,
+#   * offers to append that directory to PATH if it isn't already there.
+
+set -eu
+
+RELEASE_TAG="__RELEASE_TAG__"
+ASSET_BASE_URL="__ASSET_BASE_URL__"
+INSTALL_DIR="${GIT_MD_PUBLISH_INSTALL_DIR:-$HOME/.local/bin}"
+BINARY_NAME="git-md-publish"
+
+log() { printf 'install: %s\n' "$*" >&2; }
+fail() { log "$*"; exit 1; }
+
+detect_os() {
+    case "$(uname -s)" in
+        Darwin) echo darwin ;;
+        Linux) echo linux ;;
+        *) fail "unsupported OS: $(uname -s)" ;;
+    esac
+}
+
+detect_arch() {
+    case "$(uname -m)" in
+        arm64|aarch64) echo arm64 ;;
+        x86_64|amd64) echo x64 ;;
+        *) fail "unsupported arch: $(uname -m)" ;;
+    esac
+}
+
+OS="$(detect_os)"
+ARCH="$(detect_arch)"
+ASSET="${BINARY_NAME}-${OS}-${ARCH}"
+URL="${ASSET_BASE_URL}/${ASSET}"
+
+log "release tag:  ${RELEASE_TAG}"
+log "asset:        ${ASSET}"
+log "target:       ${INSTALL_DIR}/${BINARY_NAME}"
+
+mkdir -p "${INSTALL_DIR}"
+
+tmp="$(mktemp)"
+trap 'rm -f "${tmp}"' EXIT
+
+if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "${URL}" -o "${tmp}"
+elif command -v wget >/dev/null 2>&1; then
+    wget -q "${URL}" -O "${tmp}"
+else
+    fail "need curl or wget to download binary"
+fi
+
+mv "${tmp}" "${INSTALL_DIR}/${BINARY_NAME}"
+chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
+trap - EXIT
+
+# -- PATH handling ---------------------------------------------------------
+
+case ":${PATH}:" in
+    *":${INSTALL_DIR}:"*)
+        log "PATH already contains ${INSTALL_DIR}; you can run ${BINARY_NAME} now."
+        exit 0
+        ;;
+esac
+
+log "${INSTALL_DIR} is not on PATH."
+
+SHELL_NAME="$(basename "${SHELL:-sh}")"
+case "${SHELL_NAME}" in
+    zsh)  RC_FILE="${HOME}/.zshrc" ;;
+    bash) RC_FILE="${HOME}/.bashrc" ;;
+    ksh|sh) RC_FILE="${HOME}/.profile" ;;
+    *)    RC_FILE="" ;;
+esac
+
+PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+
+if [ -z "${RC_FILE}" ]; then
+    cat >&2 <<EOF
+install: could not determine shell rc file. Add this line to your shell
+install: configuration manually:
+
+    ${PATH_LINE}
+
+EOF
+    exit 0
+fi
+
+if [ -f "${RC_FILE}" ] && grep -qF "${PATH_LINE}" "${RC_FILE}"; then
+    log "PATH line already present in ${RC_FILE}; open a new shell to pick it up."
+    exit 0
+fi
+
+if [ -n "${GIT_MD_PUBLISH_NO_PATH:-}" ]; then
+    cat >&2 <<EOF
+install: skipping PATH modification (GIT_MD_PUBLISH_NO_PATH set). Add this to
+install: your shell configuration when you're ready:
+
+    ${PATH_LINE}
+
+EOF
+    exit 0
+fi
+
+printf '%s\n' "${PATH_LINE}" >> "${RC_FILE}"
+log "appended PATH line to ${RC_FILE}; open a new shell to pick it up."
