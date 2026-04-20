@@ -1,0 +1,38 @@
+{
+  "name": "git-md-publish",
+  "version": "0.1.0",
+  "description": "Publish public Markdown + attachments from a git repo to a remote branch.",
+  "type": "module",
+  "bin": {
+    "git-md-publish": "src/cli.js"
+  },
+  "main": "src/cli.js",
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/local/*.test.js",
+    "test:local": "node --test test/local/*.test.js",
+    "test:remote": "node --test test/remote/*.test.js",
+    "build": "node scripts/build.js"
+  },
+  "dependencies": {
+    "@flowershow/remark-wiki-link": "^3.4.0",
+    "hast-util-from-html": "^2.0.3",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "tar-stream": "^3.1.7",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.1.0",
+    "vfile": "^6.0.3",
+    "vfile-matter": "^5.0.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "postject": "^1.0.0-alpha.6"
+  }
+}
