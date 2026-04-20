@@ -92,6 +92,13 @@ async function bundleCli() {
   return outFile;
 }
 
+function hostPlatformKey() {
+  // Map Node's process.platform / process.arch to our PLATFORM_MAP key.
+  const os = process.platform === "darwin" ? "darwin" : "linux";
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  return `${os}-${arch}`;
+}
+
 async function buildOne(osName, archName) {
   const key = `${osName}-${archName}`;
   if (!PLATFORM_MAP[key]) throw new Error(`unsupported platform: ${key}`);
@@ -101,10 +108,10 @@ async function buildOne(osName, archName) {
 
   const bundlePath = await bundleCli();
 
-  // SEA blob format is Node-version specific. Generate the blob with the
-  // same Node version we embed in the final binary, regardless of host
-  // Node version — otherwise the embedded runtime silently rejects it.
-  const builderNode = await fetchNode("linux-x64");
+  // SEA blob format is Node-version specific. Generate the blob with a
+  // Node matching `NODE_VERSION` that can actually run on the host. Use
+  // the host's platform key — otherwise cross-platform builds crash.
+  const builderNode = await fetchNode(hostPlatformKey());
   const nodeBin = await fetchNode(key);
 
   // Architecture-agnostic SEA blob: no code cache, no startup snapshot.
@@ -132,11 +139,23 @@ async function buildOne(osName, archName) {
 
   log(`injecting SEA blob into ${outBin}`);
   const postjectBin = path.join(ROOT, "node_modules", ".bin", "postject");
-  execFileSync(
-    postjectBin,
-    [outBin, "NODE_SEA_BLOB", seaBlobPath, "--sentinel-fuse", SEA_FUSE],
-    { stdio: "inherit" },
-  );
+  // Mach-O binaries need an explicit segment name so postject places the
+  // SEA blob in a standalone segment that survives macOS codesigning.
+  const postjectArgs = [outBin, "NODE_SEA_BLOB", seaBlobPath, "--sentinel-fuse", SEA_FUSE];
+  if (osName === "darwin") {
+    postjectArgs.push("--macho-segment-name", "NODE_SEA");
+  }
+  execFileSync(postjectBin, postjectArgs, { stdio: "inherit" });
+
+  // Re-sign darwin binaries: postject invalidates the pre-existing ad-hoc
+  // signature that ships with the nodejs.org Mach-O. Without a valid
+  // signature, macOS (especially arm64) will kill the process at exec.
+  if (osName === "darwin") {
+    log(`ad-hoc signing ${outBin}`);
+    execFileSync("codesign", ["--sign", "-", "--force", outBin], {
+      stdio: "inherit",
+    });
+  }
 
   log(`built ${outBin}`);
 }
