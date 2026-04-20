@@ -15,9 +15,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test 'test/local/*.test.js'",
-    "test:local": "node --test 'test/local/*.test.js'",
-    "test:remote": "node --test 'test/remote/*.test.js'",
+    "test": "node --test test/local/*.test.js",
+    "test:local": "node --test test/local/*.test.js",
+    "test:remote": "node --test test/remote/*.test.js",
     "build": "node scripts/build.js"
   },
   "dependencies": {
