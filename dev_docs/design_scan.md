@@ -85,8 +85,9 @@ public: false
 - `remark-parse`
 - `remark-gfm`
 - `@flowershow/remark-wiki-link`
+- `hast-util-from-html`（仅用于 HTML embed）
 
-支持的引用形式：
+支持的 markdown 引用形式：
 
 - standard markdown link：`[text](target)`
 - standard markdown image：`![alt](target)`
@@ -95,14 +96,49 @@ public: false
 - wikilink：`[[target]]`
 - embed：`![[target]]`
 
+支持的 HTML embed 形式：仅限下列 tag/attr 组合，目标走和 markdown 引用
+完全一致的解析、外部判定、broken-reference 规则。
+
+| tag | attr |
+|---|---|
+| `<a>` | `href` |
+| `<img>` | `src` |
+| `<video>` | `src`、`poster` |
+| `<audio>` | `src` |
+| `<source>` | `src` |
+
+`<iframe>` / `<object>` / `<embed>` / `<link>` / `<script>` 等 tag **不
+follow**，理由是它们嵌入的往往是可再 ref 其它文件的复合文档，而 scan
+不递归解析 HTML。
+
 target 规范化：
 
 - 去掉 angle-bracket wrapping `<...>`
 - 去掉 fragment（`#...`）和 query（`?...`）
 - URL decode
 
-对 standard / reference 链接，如果 target 带 scheme（`http:`、`https:`、
-`mailto:`、其他 `scheme:`）或以 `//` 开头，视为外部链接，忽略。
+对 standard / reference 链接以及 HTML 引用，如果 target 带 scheme
+（`http:`、`https:`、`mailto:`、`javascript:` 等）或以 `//` 开头，视为
+外部链接，忽略。
+
+### 不安全 HTML 诊断
+
+以下构造每出现一次，scan 必须在 stderr 报一条 warning（无 flag、不可关闭）：
+
+- `<script>` / `<style>` tag
+- 任意元素上的事件处理器属性（HTML 源 `onclick` / `onload` 等，hast
+  会 camelCase 成 `onClick` / `onLoad`；通过 `/^on[A-Z]/` 识别）
+
+格式：
+
+```text
+scan: unsafe html (script): <from>: <script>
+scan: unsafe html (style):  <from>: <style>
+scan: unsafe html (event-handler): <from>: onClick on <p>
+```
+
+scan **不**改写文件内容 —— 镜像里会保留原始 HTML 片段。warning 的目的
+是让发布者知情。
 
 target 解析顺序：
 
@@ -133,3 +169,6 @@ broken reference 不会把 private markdown 强行带入输出。
 - 每个 broken reference 必须在 stderr 上出现一次，格式：
   `broken reference (<reason>): <from> -> <target>`。
 - `reason` 取值：`missing` | `not-public`。
+- 每个不安全 HTML 构造必须在 stderr 上出现一次，格式：
+  `unsafe html (<kind>): <from>: <detail>`。
+- `kind` 取值：`script` | `style` | `event-handler`。

@@ -157,9 +157,14 @@ export async function scanRepo({ repoRoot, warn = () => {} }) {
 
   const attachments = new Set();
   const brokenRefs = [];
+  const unsafeHtml = [];
   for (const filePath of publicMarkdown) {
     const body = markdownBody.get(filePath);
-    for (const { target } of extractReferences(body)) {
+    const { references, unsafeHtml: htmlDiagnostics } = extractReferences(body);
+    for (const h of htmlDiagnostics) {
+      unsafeHtml.push({ from: filePath, ...h });
+    }
+    for (const { target } of references) {
       const resolved = resolveReferenceTarget({
         fromFile: filePath,
         target,
@@ -184,9 +189,12 @@ export async function scanRepo({ repoRoot, warn = () => {} }) {
   for (const br of brokenRefs) {
     emit(`broken reference (${br.reason}): ${br.from} -> ${br.target}`);
   }
+  for (const u of unsafeHtml) {
+    emit(`unsafe html (${u.kind}): ${u.from}: ${u.detail}`);
+  }
 
   const paths = [...new Set([...publicMarkdown, ...attachments])].sort();
-  return { paths, warnings, brokenRefs };
+  return { paths, warnings, brokenRefs, unsafeHtml };
 }
 
 export async function runScan({ repoRoot, stdout, stderr }) {

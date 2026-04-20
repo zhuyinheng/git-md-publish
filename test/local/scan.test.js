@@ -212,6 +212,147 @@ test("scan: reports broken reference when target markdown is not public", async 
   }
 });
 
+test("scan: HTML <img>/<a> attributes are followed into the mirror", async () => {
+  const repo = makeFixtureRepo({
+    "README.md": "---\npublic: true\n---\n",
+    "note.md":
+      "---\npublic: true\n---\n" +
+      '<img src="img/a.png" alt="a">\n' +
+      '<a href="other.md">other</a>\n',
+    "other.md": "---\npublic: true\n---\nhello\n",
+    "img/a.png": "PNG",
+  });
+  try {
+    const { code, stdout, stderr } = runCli(["scan", repo]);
+    assert.equal(code, 0);
+    const paths = parseLines(stdout);
+    assert.ok(paths.includes("img/a.png"), "HTML <img src> must be followed");
+    assert.ok(paths.includes("other.md"), "HTML <a href> must be followed");
+    assert.doesNotMatch(stderr, /broken reference/);
+  } finally {
+    await rmTmp(repo);
+  }
+});
+
+test("scan: case-insensitive HTML tag + nested elements", async () => {
+  const repo = makeFixtureRepo({
+    "README.md": "---\npublic: true\n---\n",
+    "note.md":
+      "---\npublic: true\n---\n" +
+      '<div><IMG Src="x.png"/></div>\n' +
+      '<video src="v.mp4" poster="p.jpg"><SOURCE src="v.webm"></video>\n',
+    "x.png": "X",
+    "v.mp4": "V",
+    "p.jpg": "P",
+    "v.webm": "W",
+  });
+  try {
+    const { code, stdout } = runCli(["scan", repo]);
+    assert.equal(code, 0);
+    const paths = parseLines(stdout);
+    for (const p of ["x.png", "v.mp4", "p.jpg", "v.webm"]) {
+      assert.ok(paths.includes(p), `HTML ref ${p} must be followed`);
+    }
+  } finally {
+    await rmTmp(repo);
+  }
+});
+
+test("scan: <script src> is not followed (not in allowlist)", async () => {
+  const repo = makeFixtureRepo({
+    "README.md": "---\npublic: true\n---\n",
+    "note.md":
+      "---\npublic: true\n---\n" +
+      '<script src="evil.js">console.log("x")</script>\n',
+    "evil.js": "// would be bad to publish",
+  });
+  try {
+    const { code, stdout, stderr } = runCli(["scan", repo]);
+    assert.equal(code, 0);
+    const paths = parseLines(stdout);
+    assert.ok(!paths.includes("evil.js"), "<script src> must not be followed");
+    assert.match(stderr, /unsafe html \(script\):\s+note\.md:\s+<script>/);
+  } finally {
+    await rmTmp(repo);
+  }
+});
+
+test("scan: inline event handlers trigger unsafe-html warning", async () => {
+  const repo = makeFixtureRepo({
+    "README.md": "---\npublic: true\n---\n",
+    "note.md":
+      "---\npublic: true\n---\n" +
+      '<p onclick="foo()">click me</p>\n',
+  });
+  try {
+    const { code, stderr } = runCli(["scan", repo]);
+    assert.equal(code, 0);
+    assert.match(
+      stderr,
+      /unsafe html \(event-handler\):\s+note\.md:\s+onClick on <p>/,
+    );
+  } finally {
+    await rmTmp(repo);
+  }
+});
+
+test("scan: <style> block triggers unsafe-html warning", async () => {
+  const repo = makeFixtureRepo({
+    "README.md": "---\npublic: true\n---\n",
+    "note.md":
+      "---\npublic: true\n---\n" +
+      "<style>.x { color: red; }</style>\n",
+  });
+  try {
+    const { code, stderr } = runCli(["scan", repo]);
+    assert.equal(code, 0);
+    assert.match(stderr, /unsafe html \(style\):\s+note\.md:\s+<style>/);
+  } finally {
+    await rmTmp(repo);
+  }
+});
+
+test("scan: external HTML src is ignored, not a broken reference", async () => {
+  const repo = makeFixtureRepo({
+    "README.md": "---\npublic: true\n---\n",
+    "note.md":
+      "---\npublic: true\n---\n" +
+      '<img src="https://example.com/x.png">\n' +
+      '<a href="mailto:a@b.com">mail</a>\n' +
+      '<a href="javascript:alert(1)">js</a>\n',
+  });
+  try {
+    const { code, stdout, stderr } = runCli(["scan", repo]);
+    assert.equal(code, 0);
+    assert.deepEqual(parseLines(stdout), ["README.md", "note.md"]);
+    assert.doesNotMatch(stderr, /broken reference/);
+    assert.doesNotMatch(stderr, /unsafe html/); // these aren't unsafe, just external
+  } finally {
+    await rmTmp(repo);
+  }
+});
+
+test("scan: HTML ref to non-public markdown is a not-public broken reference", async () => {
+  const repo = makeFixtureRepo({
+    "README.md": "---\npublic: true\n---\n",
+    "note.md":
+      "---\npublic: true\n---\n" +
+      '<a href="secret.md">leak</a>\n',
+    "secret.md": "---\npublic: false\n---\ntop\n",
+  });
+  try {
+    const { code, stdout, stderr } = runCli(["scan", repo]);
+    assert.equal(code, 0);
+    assert.ok(!parseLines(stdout).includes("secret.md"));
+    assert.match(
+      stderr,
+      /broken reference \(not-public\):\s+note\.md\s+->\s+secret\.md/,
+    );
+  } finally {
+    await rmTmp(repo);
+  }
+});
+
 test("scan: links inside fenced code blocks are not followed", async () => {
   // remark AST gives code blocks their own node type; references inside
   // must not be extracted as real references (no broken ref, no include).
