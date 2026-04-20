@@ -15,6 +15,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, "..");
 export const CLI = path.join(REPO_ROOT, "src", "cli.js");
 
+// Give tests a self-contained git identity. `sync` fails by design when the
+// host lacks `user.name` / `user.email`, so tests that exercise sync must
+// guarantee identity. We redirect HOME to a disposable dir with a minimal
+// gitconfig rather than mutating the caller's global config, which keeps
+// tests reproducible on any machine (CI, fresh container, etc.).
+{
+  const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "gmp-test-home-"));
+  fs.writeFileSync(
+    path.join(testHome, ".gitconfig"),
+    "[user]\n\tname = git-md-publish test\n\temail = test@example.com\n",
+  );
+  process.env.HOME = testHome;
+  process.env.GIT_CONFIG_NOSYSTEM = "1";
+}
+
 export function mkTmp(prefix = "gmp-test-") {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
