@@ -7,7 +7,7 @@ notes are meant to be public.
 ## Install
 
 ```sh
-curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/zhuyinheng/git-md-publish/releases/latest/download/install.sh | sh
 ```
 
 `install.sh` picks a channel automatically:
@@ -34,7 +34,7 @@ rm -rf ~/.local/lib/git-md-publish
 Publish the obsidian_test_vault fixture to a throwaway local mirror:
 
 ```sh
-git clone https://github.com/<owner>/obsidian_test_vault.git /tmp/vault
+git clone https://github.com/zhuyinheng/obsidian_test_vault.git /tmp/vault
 git-md-publish publish /tmp/vault remote=/tmp/vault-mirror branch=main
 git --git-dir=/tmp/vault-mirror log --oneline main
 ```
